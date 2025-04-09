@@ -4,6 +4,7 @@ import { InjectModel } from '@nestjs/sequelize';
 import { EventsModel } from './model/events.model'; // Adjust the path
 import { EventImageModel } from './model/event-images.model'; // Adjust the path
 import { Request, Response } from 'express';
+import { Op, Sequelize } from 'sequelize';
 
 @Injectable()
 export class EventsService {
@@ -12,6 +13,7 @@ export class EventsService {
     private readonly eventModel: typeof EventsModel,
     @InjectModel(EventImageModel)
     private readonly eventImageModel: typeof EventImageModel,
+    // private sequelize: Sequelize,
   ) {}
 
   async create(
@@ -54,36 +56,74 @@ export class EventsService {
     }
   }
 
-  async getPaginatedEvents(page, limit, req: Request, res: Response) {
+  async getPaginatedEvents(
+    page: string | number,
+    limit: string | number,
+    req: Request,
+    res: Response,
+  ) {
     try {
       const pageNum = typeof page === 'string' ? parseInt(page, 10) : page;
       const limitNum = typeof limit === 'string' ? parseInt(limit, 10) : limit;
+      const offset = (pageNum - 1) * limitNum;
 
-      const offset = (pageNum - 1) * parseInt(limitNum);
+      const { name, startDate, endDate, q, sortBy, order } = req.query;
 
+      let whereClause: any = {};
+
+      if (name) {
+        whereClause.name = name;
+      }
+
+      if (startDate) {
+        whereClause.start_date = startDate;
+      }
+
+      if (endDate) {
+        whereClause.end_date = endDate;
+      }
+
+      if (q) {
+        whereClause[Op.or] = [
+          { name: { [Op.like]: `%${q}%` } },
+          { description: { [Op.like]: `%${q}%` } },
+        ];
+      }
+
+      let orderClause: any = [['created_at', 'DESC']];
+      if (sortBy) {
+        const sortOrder =
+          order &&
+          (String(order).toUpperCase() === 'ASC' ||
+            String(order).toUpperCase() === 'DESC')
+            ? String(order).toUpperCase()
+            : 'DESC';
+        orderClause = [[String(sortBy), sortOrder]];
+      }
       const { count, rows } = await this.eventModel.findAndCountAll({
         limit: limitNum,
         offset,
+        where: whereClause,
         include: [
           {
             model: EventImageModel,
             as: 'events_images',
           },
         ],
-        order: [['created_at', 'DESC']],
+        order: orderClause,
       });
 
-      const totalPages = Math.ceil(count / limit);
+      const totalPages = Math.ceil(count / limitNum);
 
-      return res.status(201).json({
-        status: 201,
-        message: 'Event created successfully with images.',
+      return res.status(200).json({
+        status: 200,
+        message: 'Events fetched successfully.',
         data: { events: rows },
         total: count,
-        currentPage: page,
+        currentPage: pageNum,
         totalPages,
       });
-    } catch (error) {
+    } catch (error: any) {
       return res.status(500).json({
         status: 500,
         message: error.message,
